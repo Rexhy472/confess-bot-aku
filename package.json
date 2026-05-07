@@ -1,0 +1,13 @@
+{
+  "name": "confess-bot",
+  "version": "1.0.0",
+  "type": "module",
+  "main": "index.js",
+  "dependencies": {
+    "discord.js": "^14.11.0",
+    "lowdb": "^5.0.4"
+  },
+  "scripts": {
+    "start": "node index.js"
+  }
+}
