@@ -10,7 +10,8 @@ const {
   ButtonStyle,
   ModalBuilder,
   TextInputBuilder,
-  TextInputStyle
+  TextInputStyle,
+  PermissionsBitField
 } = require("discord.js");
 
 const fs = require("fs");
@@ -18,20 +19,34 @@ const fs = require("fs");
 const client = new Client({
   intents: [
     GatewayIntentBits.Guilds,
+    GatewayIntentBits.GuildMembers,
     GatewayIntentBits.DirectMessages
   ],
   partials: [Partials.Channel]
 });
 
-// 0 = cooldown mati.
-// Kalau nanti mau aktifin 5 menit, ubah jadi: 5 * 60 * 1000
+// ==========================================
+// CONFIG
+// 0 = cooldown mati
+// Kalau mau 5 menit: 5 * 60 * 1000
+// ==========================================
 const COOLDOWN_MS = 0;
 
+// ==========================================
+// DATABASE
+// ==========================================
 function loadDb() {
   if (!fs.existsSync("db.json")) {
     fs.writeFileSync(
       "db.json",
-      JSON.stringify({ cooldowns: {}, confessions: {} }, null, 2)
+      JSON.stringify(
+        {
+          cooldowns: {},
+          confessions: {}
+        },
+        null,
+        2
+      )
     );
   }
 
@@ -42,13 +57,51 @@ function saveDb(db) {
   fs.writeFileSync("db.json", JSON.stringify(db, null, 2));
 }
 
+// ==========================================
+// STAFF CHECK (SUPPORT MULTIPLE ROLES)
+// STAFF_ROLE_IDS=123456789,987654321
+// ==========================================
+function isStaff(member) {
+  if (!member) return false;
+
+  if (
+    member.permissions.has(
+      PermissionsBitField.Flags.Administrator
+    )
+  ) {
+    return true;
+  }
+
+  const roleIds = process.env.STAFF_ROLE_IDS
+    ?.split(",")
+    .map(id => id.trim())
+    .filter(Boolean);
+
+  if (!roleIds || roleIds.length === 0) {
+    return false;
+  }
+
+  return roleIds.some(roleId =>
+    member.roles.cache.has(roleId)
+  );
+}
+
+// ==========================================
+// READY
+// ==========================================
 client.once("ready", () => {
-  console.log(`Bot online sebagai ${client.user.tag}`);
+  console.log(`✅ Bot online sebagai ${client.user.tag}`);
 });
 
+// ==========================================
+// MAIN INTERACTION HANDLER
+// ==========================================
 client.on("interactionCreate", async interaction => {
   const db = loadDb();
 
+  // ========================================
+  // SLASH COMMAND: /confess
+  // ========================================
   if (interaction.isChatInputCommand()) {
     if (interaction.commandName !== "confess") return;
 
@@ -57,6 +110,7 @@ client.on("interactionCreate", async interaction => {
     const message = interaction.options.getString("pesan");
     const anonymous = interaction.options.getBoolean("anonim");
 
+    // Validasi
     if (target.bot) {
       return interaction.reply({
         content: "❌ Tidak bisa confess ke bot.",
@@ -71,15 +125,18 @@ client.on("interactionCreate", async interaction => {
       });
     }
 
+    // Cooldown (opsional)
     if (COOLDOWN_MS > 0) {
       const now = Date.now();
       const lastUsed = db.cooldowns[sender.id] || 0;
 
       if (now - lastUsed < COOLDOWN_MS) {
-        const remaining = Math.ceil((COOLDOWN_MS - (now - lastUsed)) / 60000);
+        const remaining = Math.ceil(
+          (COOLDOWN_MS - (now - lastUsed)) / 60000
+        );
 
         return interaction.reply({
-          content: `⏳ Tunggu ${remaining} menit sebelum confess lagi.`,
+          content: `⏳ Tunggu ${remaining} menit sebelum mengirim confess lagi.`,
           ephemeral: true
         });
       }
@@ -87,9 +144,10 @@ client.on("interactionCreate", async interaction => {
       db.cooldowns[sender.id] = now;
     }
 
-    const confessId = Date.now().toString();
+    // Simpan data
+    const confessionId = Date.now().toString();
 
-    db.confessions[confessId] = {
+    db.confessions[confessionId] = {
       senderId: sender.id,
       senderTag: sender.tag,
       targetId: target.id,
@@ -102,49 +160,56 @@ client.on("interactionCreate", async interaction => {
 
     saveDb(db);
 
-    const confessEmbed = new EmbedBuilder()
-      .setTitle("💌 Ada Confess Untukmu")
+    // Embed DM ke target
+    const embed = new EmbedBuilder()
+      .setTitle("💌 Kamu menerima confess!")
       .setDescription(message)
       .addFields({
-        name: "Pengirim",
-        value: anonymous ? "Anonymous" : sender.tag
+        name: "👤 Dari",
+        value: anonymous ? "Seseorang" : sender.tag
       })
-      .setFooter({ text: `Confess ID: ${confessId}` })
+      .setFooter({
+        text: `Confess ID: ${confessionId}`
+      })
       .setTimestamp();
 
+    // Tombol
     const row = new ActionRowBuilder().addComponents(
       new ButtonBuilder()
-        .setCustomId(`accept_${confessId}`)
-        .setLabel("Accept")
+        .setCustomId(`accept_${confessionId}`)
+        .setLabel("ACC")
         .setStyle(ButtonStyle.Success),
 
       new ButtonBuilder()
-        .setCustomId(`deny_${confessId}`)
-        .setLabel("Deny")
+        .setCustomId(`deny_${confessionId}`)
+        .setLabel("DENY")
         .setStyle(ButtonStyle.Danger),
 
       new ButtonBuilder()
-        .setCustomId(`denyreason_${confessId}`)
-        .setLabel("Deny + Reason")
+        .setCustomId(`denyreason_${confessionId}`)
+        .setLabel("DENY + REASON")
         .setStyle(ButtonStyle.Secondary)
     );
 
+    // Kirim DM
     try {
       await target.send({
-        embeds: [confessEmbed],
+        embeds: [embed],
         components: [row]
       });
 
       await interaction.reply({
-        content: "✅ Confess berhasil dikirim ke target.",
+        content:
+          "✅ Confess berhasil dikirim dan sedang menunggu respons.",
         ephemeral: true
       });
     } catch {
-      delete db.confessions[confessId];
+      delete db.confessions[confessionId];
       saveDb(db);
 
       await interaction.reply({
-        content: "❌ Gagal kirim DM. Kemungkinan DM target tertutup.",
+        content:
+          "❌ Gagal mengirim DM ke target. Kemungkinan DM mereka tertutup.",
         ephemeral: true
       });
     }
@@ -152,9 +217,14 @@ client.on("interactionCreate", async interaction => {
     return;
   }
 
+  // ========================================
+  // BUTTON INTERACTIONS
+  // ========================================
   if (interaction.isButton()) {
-    const [action, confessId] = interaction.customId.split("_");
-    const confession = db.confessions[confessId];
+    const [action, confessionId] =
+      interaction.customId.split("_");
+
+    const confession = db.confessions[confessionId];
 
     if (!confession) {
       return interaction.reply({
@@ -163,19 +233,27 @@ client.on("interactionCreate", async interaction => {
       });
     }
 
+    // Hanya target yang boleh merespons
     if (interaction.user.id !== confession.targetId) {
       return interaction.reply({
-        content: "❌ Hanya target yang bisa merespons confess ini.",
+        content:
+          "❌ Hanya target yang bisa merespons confess ini.",
         ephemeral: true
       });
     }
 
+    // ACC
     if (action === "accept") {
       confession.status = "accepted";
+      confession.respondedBy = interaction.user.id;
       confession.respondedAt = new Date().toISOString();
       saveDb(db);
 
-      await notifySender(confession, `💖 Confess kamu diterima oleh ${interaction.user.tag}.`);
+      await notifySender(
+        confession,
+        `💖 Confess kamu diterima oleh ${interaction.user.tag}!`
+      );
+
       await sendLog(confession, "Accepted");
 
       return interaction.update({
@@ -185,12 +263,18 @@ client.on("interactionCreate", async interaction => {
       });
     }
 
+    // DENY
     if (action === "deny") {
       confession.status = "denied";
+      confession.respondedBy = interaction.user.id;
       confession.respondedAt = new Date().toISOString();
       saveDb(db);
 
-      await notifySender(confession, `💔 Confess kamu ditolak oleh ${interaction.user.tag}.`);
+      await notifySender(
+        confession,
+        `💔 Confess kamu ditolak oleh ${interaction.user.tag}.`
+      );
+
       await sendLog(confession, "Denied");
 
       return interaction.update({
@@ -200,9 +284,12 @@ client.on("interactionCreate", async interaction => {
       });
     }
 
+    // DENY + REASON
     if (action === "denyreason") {
       const modal = new ModalBuilder()
-        .setCustomId(`denyreasonmodal_${confessId}`)
+        .setCustomId(
+          `denyreasonmodal_${confessionId}`
+        )
         .setTitle("Alasan Penolakan");
 
       const reasonInput = new TextInputBuilder()
@@ -212,18 +299,35 @@ client.on("interactionCreate", async interaction => {
         .setRequired(true);
 
       modal.addComponents(
-        new ActionRowBuilder().addComponents(reasonInput)
+        new ActionRowBuilder().addComponents(
+          reasonInput
+        )
       );
 
       return interaction.showModal(modal);
     }
   }
 
+  // ========================================
+  // MODAL SUBMIT
+  // ========================================
   if (interaction.isModalSubmit()) {
-    if (!interaction.customId.startsWith("denyreasonmodal_")) return;
+    if (
+      !interaction.customId.startsWith(
+        "denyreasonmodal_"
+      )
+    ) {
+      return;
+    }
 
-    const confessId = interaction.customId.replace("denyreasonmodal_", "");
-    const confession = db.confessions[confessId];
+    const confessionId =
+      interaction.customId.replace(
+        "denyreasonmodal_",
+        ""
+      );
+
+    const confession =
+      db.confessions[confessionId];
 
     if (!confession) {
       return interaction.reply({
@@ -232,11 +336,18 @@ client.on("interactionCreate", async interaction => {
       });
     }
 
-    const reason = interaction.fields.getTextInputValue("reason");
+    const reason =
+      interaction.fields.getTextInputValue(
+        "reason"
+      );
 
     confession.status = "denied_with_reason";
     confession.reason = reason;
-    confession.respondedAt = new Date().toISOString();
+    confession.respondedBy =
+      interaction.user.id;
+    confession.respondedAt =
+      new Date().toISOString();
+
     saveDb(db);
 
     await notifySender(
@@ -244,36 +355,83 @@ client.on("interactionCreate", async interaction => {
       `💔 Confess kamu ditolak oleh ${interaction.user.tag}.\n\n📝 Alasan: ${reason}`
     );
 
-    await sendLog(confession, "Denied with Reason");
+    await sendLog(
+      confession,
+      "Denied with Reason"
+    );
 
     return interaction.reply({
-      content: "❌ Confess ditolak dengan alasan.",
+      content:
+        "❌ Confess ditolak dengan alasan.",
       ephemeral: true
     });
   }
 });
 
-async function notifySender(confession, text) {
+// ==========================================
+// KIRIM DM KE PENGIRIM
+// ==========================================
+async function notifySender(
+  confession,
+  text
+) {
   try {
-    const sender = await client.users.fetch(confession.senderId);
+    const sender =
+      await client.users.fetch(
+        confession.senderId
+      );
     await sender.send(text);
   } catch {
-    console.log("Gagal DM pengirim.");
+    console.log(
+      "⚠️ Gagal mengirim DM ke pengirim."
+    );
   }
 }
 
-async function sendLog(confession, result) {
+// ==========================================
+// LOG CHANNEL
+// ==========================================
+async function sendLog(
+  confession,
+  result
+) {
   try {
-    const logChannel = await client.channels.fetch(process.env.LOG_CHANNEL_ID);
+    const logChannel =
+      await client.channels
+        .fetch(
+          process.env.LOG_CHANNEL_ID
+        )
+        .catch(() => null);
+
+    if (!logChannel) return;
 
     const embed = new EmbedBuilder()
       .setTitle("📋 Confess Log")
       .addFields(
-        { name: "Status", value: result, inline: true },
-        { name: "Anonymous", value: confession.anonymous ? "Ya" : "Tidak", inline: true },
-        { name: "Sender", value: `${confession.senderTag}\n${confession.senderId}` },
-        { name: "Target", value: `${confession.targetTag}\n${confession.targetId}` },
-        { name: "Pesan", value: confession.message }
+        {
+          name: "Status",
+          value: result,
+          inline: true
+        },
+        {
+          name: "Anonymous",
+          value: confession.anonymous
+            ? "Ya"
+            : "Tidak",
+          inline: true
+        },
+        {
+          name: "Sender",
+          value: `${confession.senderTag}\n${confession.senderId}`
+        },
+        {
+          name: "Target",
+          value: `${confession.targetTag}\n${confession.targetId}`
+        },
+        {
+          name: "Pesan",
+          value: confession.message
+        }
       )
       .setTimestamp();
 
@@ -284,10 +442,15 @@ async function sendLog(confession, result) {
       });
     }
 
-    await logChannel.send({ embeds: [embed] });
+    await logChannel.send({
+      embeds: [embed]
+    });
   } catch {
-    console.log("Gagal kirim log.");
+    console.log("⚠️ Gagal mengirim log.");
   }
 }
 
+// ==========================================
+// LOGIN
+// ==========================================
 client.login(process.env.DISCORD_TOKEN);
