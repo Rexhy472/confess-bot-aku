@@ -1,13 +1,14 @@
 {
-  "name": "confess-bot",
+  "name": "confess-bot-aku",
   "version": "1.0.0",
-  "type": "module",
+  "description": "Discord Confess Bot",
   "main": "index.js",
-  "dependencies": {
-    "discord.js": "^14.11.0",
-    "lowdb": "^5.0.4"
-  },
   "scripts": {
-    "start": "node index.js"
+    "start": "node index.js",
+    "deploy": "node deploy-commands.js"
+  },
+  "dependencies": {
+    "discord.js": "^14.21.0",
+    "dotenv": "^16.6.1"
   }
 }
