@@ -9,7 +9,7 @@ const commands = [
     .addUserOption(option =>
       option
         .setName("target")
-        .setDescription("Target confess")
+        .setDescription("Pilih target confess")
         .setRequired(true)
     )
     .addStringOption(option =>
@@ -27,11 +27,13 @@ const commands = [
     .toJSON()
 ];
 
-const rest = new REST({ version: "10" }).setToken(process.env.DISCORD_TOKEN);
+const rest = new REST({ version: "10" }).setToken(
+  process.env.DISCORD_TOKEN
+);
 
 (async () => {
   try {
-    console.log("Deploying slash commands...");
+    console.log("⏳ Deploying slash commands...");
 
     await rest.put(
       Routes.applicationGuildCommands(
@@ -41,8 +43,8 @@ const rest = new REST({ version: "10" }).setToken(process.env.DISCORD_TOKEN);
       { body: commands }
     );
 
-    console.log("Slash commands deployed!");
+    console.log("✅ Slash commands berhasil di-deploy!");
   } catch (error) {
-    console.error(error);
+    console.error("❌ Gagal deploy command:", error);
   }
 })();
