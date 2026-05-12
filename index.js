@@ -16,6 +16,22 @@ const {
 
 const fs = require("fs");
 
+// ==========================================
+// MINI WEB SERVER UNTUK RENDER
+// ==========================================
+const http = require("http");
+
+const PORT = process.env.PORT || 3000;
+
+http
+  .createServer((req, res) => {
+    res.writeHead(200, { "Content-Type": "text/plain" });
+    res.end("Bot is running!");
+  })
+  .listen(PORT, () => {
+    console.log(`🌐 Web server berjalan di port ${PORT}`);
+  });
+
 const client = new Client({
   intents: [
     GatewayIntentBits.Guilds,
@@ -24,7 +40,6 @@ const client = new Client({
   ],
   partials: [Partials.Channel]
 });
-
 // ==========================================
 // CONFIG
 // 0 = cooldown mati
