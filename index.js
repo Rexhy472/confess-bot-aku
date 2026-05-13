@@ -514,10 +514,10 @@ client.on("interactionCreate", async interaction => {
       }
     }
     
-if (interaction.isModalSubmit()) {
-  await interaction.deferReply({
+        if (interaction.isModalSubmit()) {
+          await interaction.deferReply({ ephemeral: true });
 
-  if (interaction.customId.startsWith("confessmodal_")) {
+          if (interaction.customId.startsWith("confessmodal_")) {
         const anonymous = interaction.customId.endsWith("_anon");
 
         const id = generateId();
