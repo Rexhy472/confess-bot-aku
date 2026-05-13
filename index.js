@@ -166,7 +166,7 @@ client.on("interactionCreate", async interaction => {
 
       return interaction.reply({
         content: "Pilih mode confess kamu:",
-        components: [row]
+        components: [row],
         ephemeral: true
   });
 }
