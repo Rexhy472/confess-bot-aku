@@ -149,6 +149,8 @@ client.on("interactionCreate", async interaction => {
   try {
     if (interaction.isChatInputCommand()) {
       if (interaction.commandName !== "confess") return;
+  
+      await interaction.deferReply({ ephemeral: true });
 
       const row = new ActionRowBuilder().addComponents(
         new ButtonBuilder()
@@ -160,14 +162,13 @@ client.on("interactionCreate", async interaction => {
           .setCustomId("confess_name")
           .setLabel("Tampilkan Nama")
           .setStyle(ButtonStyle.Primary)
-      );
+  );
 
-      return interaction.deferReply({
+      return interaction.editReply({
         content: "Pilih mode confess kamu:",
-        components: [row],
-        ephemeral: true
-      });
-    }
+        components: [row]
+  });
+}
 
     if (interaction.isButton()) {
       if (
