@@ -150,8 +150,6 @@ client.on("interactionCreate", async interaction => {
     if (interaction.isChatInputCommand()) {
       if (interaction.commandName !== "confess") return;
   
-      await interaction.deferReply({ ephemeral: true });
-
       const row = new ActionRowBuilder().addComponents(
         new ButtonBuilder()
           .setCustomId("confess_anon")
