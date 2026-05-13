@@ -164,9 +164,10 @@ client.on("interactionCreate", async interaction => {
           .setStyle(ButtonStyle.Primary)
   );
 
-      return interaction.editReply({
+      return interaction.reply({
         content: "Pilih mode confess kamu:",
         components: [row]
+        ephemeral: true
   });
 }
 
@@ -695,6 +696,7 @@ client.on("interactionCreate", async interaction => {
   } catch (error) {
     console.error("Interaction error:", error);
 
+  try {
     if (interaction.replied || interaction.deferred) {
       return interaction.followUp({
         content: "❌ Terjadi error saat memproses interaction.",
@@ -702,10 +704,12 @@ client.on("interactionCreate", async interaction => {
       });
     }
 
-    return interaction.editReply({
+    return interaction.reply({
       content: "❌ Terjadi error saat memproses interaction.",
       ephemeral: true
     });
+  } catch (err) {
+    console.error("Gagal mengirim pesan error:", err);
   }
 });
 
