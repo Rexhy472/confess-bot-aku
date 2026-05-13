@@ -398,6 +398,8 @@ client.on("interactionCreate", async interaction => {
           });
         }
 
+        await interaction.deferUpdate();
+
         const replyId = interaction.customId.replace("reply_accept_", "");
         const reply = await getReply(replyId);
 
@@ -459,7 +461,7 @@ client.on("interactionCreate", async interaction => {
           { name: "Reply", value: reply.message }
         ]);
 
-        return interaction.update({
+        return interaction.message.edit({
           content: `✅ Reply #${replyId} approved.`,
           embeds: [],
           components: []
@@ -506,7 +508,7 @@ client.on("interactionCreate", async interaction => {
           { name: "Reply", value: reply.message }
         ]);
 
-        return interaction.update({
+        return interaction.message.edit({
           content: `❌ Reply #${replyId} denied.`,
           embeds: [],
           components: []
