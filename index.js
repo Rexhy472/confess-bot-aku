@@ -513,9 +513,11 @@ client.on("interactionCreate", async interaction => {
         });
       }
     }
+    
+if (interaction.isModalSubmit()) {
+  await interaction.deferReply({
 
-    if (interaction.isModalSubmit()) {
-      if (interaction.customId.startsWith("confessmodal_")) {
+  if (interaction.customId.startsWith("confessmodal_")) {
         const anonymous = interaction.customId.endsWith("_anon");
 
         const id = generateId();
@@ -537,7 +539,7 @@ client.on("interactionCreate", async interaction => {
 
         if (error) {
           console.error(error);
-          return interaction.reply({
+          return interaction.editReply({
             content: "❌ Gagal menyimpan confession ke database.",
             ephemeral: true
           });
