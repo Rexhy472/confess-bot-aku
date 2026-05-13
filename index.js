@@ -162,7 +162,7 @@ client.on("interactionCreate", async interaction => {
           .setStyle(ButtonStyle.Primary)
       );
 
-      return interaction.reply({
+      return interaction.editReply({
         content: "Pilih mode confess kamu:",
         components: [row],
         ephemeral: true
@@ -232,7 +232,7 @@ client.on("interactionCreate", async interaction => {
           .catch(() => null);
 
         if (!confessChannel) {
-          return interaction.reply({
+          return interaction.editReply({
             content: "❌ Channel confess publik tidak ditemukan.",
             ephemeral: true
           });
@@ -306,7 +306,7 @@ client.on("interactionCreate", async interaction => {
 
       if (interaction.customId.startsWith("review_deny_")) {
         if (!isStaff(interaction.member)) {
-          return interaction.reply({
+          return interaction.editReply({
             content: "❌ Kamu bukan staff.",
             ephemeral: true
           });
@@ -316,7 +316,7 @@ client.on("interactionCreate", async interaction => {
         const confession = await getConfession(id);
 
         if (!confession || confession.status !== "pending") {
-          return interaction.reply({
+          return interaction.editReply({
             content: "❌ Data confess tidak ditemukan atau sudah diproses.",
             ephemeral: true
           });
@@ -359,7 +359,7 @@ client.on("interactionCreate", async interaction => {
         const confession = await getConfession(confessionId);
 
         if (!confession || confession.status !== "approved") {
-          return interaction.reply({
+          return interaction.editReply({
             content: "❌ Confession ini belum ditemukan.",
             ephemeral: true
           });
@@ -392,7 +392,7 @@ client.on("interactionCreate", async interaction => {
 
       if (interaction.customId.startsWith("reply_accept_")) {
         if (!isStaff(interaction.member)) {
-          return interaction.reply({
+          return interaction.editReply({
             content: "❌ Kamu bukan staff.",
             ephemeral: true
           });
@@ -404,7 +404,7 @@ client.on("interactionCreate", async interaction => {
         const reply = await getReply(replyId);
 
         if (!reply || reply.status !== "pending") {
-          return interaction.reply({
+          return interaction.editReply({
             content: "❌ Data reply tidak ditemukan atau sudah diproses.",
             ephemeral: true
           });
@@ -413,7 +413,7 @@ client.on("interactionCreate", async interaction => {
         const parent = await getConfession(reply.confession_id);
 
         if (!parent || !parent.thread_id) {
-          return interaction.reply({
+          return interaction.editReply({
             content: "❌ Confess utama atau thread tidak ditemukan.",
             ephemeral: true
           });
@@ -424,7 +424,7 @@ client.on("interactionCreate", async interaction => {
           .catch(() => null);
 
         if (!thread) {
-          return interaction.reply({
+          return interaction.editReply({
             content: "❌ Thread confess tidak ditemukan.",
             ephemeral: true
           });
@@ -470,7 +470,7 @@ client.on("interactionCreate", async interaction => {
 
       if (interaction.customId.startsWith("reply_deny_")) {
         if (!isStaff(interaction.member)) {
-          return interaction.reply({
+          return interaction.editReply({
             content: "❌ Kamu bukan staff.",
             ephemeral: true
           });
@@ -480,7 +480,7 @@ client.on("interactionCreate", async interaction => {
         const reply = await getReply(replyId);
 
         if (!reply || reply.status !== "pending") {
-          return interaction.reply({
+          return interaction.editReply({
             content: "❌ Data reply tidak ditemukan atau sudah diproses.",
             ephemeral: true
           });
@@ -552,7 +552,7 @@ client.on("interactionCreate", async interaction => {
           .catch(() => null);
 
         if (!reviewChannel) {
-          return interaction.reply({
+          return interaction.editReply({
             content: "❌ Channel review staff tidak ditemukan.",
             ephemeral: true
           });
@@ -611,7 +611,7 @@ client.on("interactionCreate", async interaction => {
         const parent = await getConfession(confessionId);
 
         if (!parent || parent.status !== "approved") {
-          return interaction.reply({
+          return interaction.editReply({
             content: "❌ Confession utama tidak ditemukan.",
             ephemeral: true
           });
@@ -634,7 +634,7 @@ client.on("interactionCreate", async interaction => {
 
         if (error) {
           console.error(error);
-          return interaction.reply({
+          return interaction.editReply({
             content: "❌ Gagal menyimpan reply ke database.",
             ephemeral: true
           });
@@ -645,7 +645,7 @@ client.on("interactionCreate", async interaction => {
           .catch(() => null);
 
         if (!reviewChannel) {
-          return interaction.reply({
+          return interaction.editReply({
             content: "❌ Channel review staff tidak ditemukan.",
             ephemeral: true
           });
@@ -685,7 +685,7 @@ client.on("interactionCreate", async interaction => {
           components: [row]
         });
 
-        return interaction.reply({
+        return interaction.editReply({
           content: `✅ Reply kamu sudah masuk review staff. (#${replyId})`,
           ephemeral: true
         });
@@ -701,7 +701,7 @@ client.on("interactionCreate", async interaction => {
       });
     }
 
-    return interaction.reply({
+    return interaction.editReply({
       content: "❌ Terjadi error saat memproses interaction.",
       ephemeral: true
     });
