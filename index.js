@@ -2,11 +2,6 @@ require("dotenv").config();
 
 const { createClient } = require("@supabase/supabase-js");
 
-const supabase = createClient(
-  process.env.SUPABASE_URL,
-  process.env.SUPABASE_ANON_KEY
-);
-
 const {
   Client,
   GatewayIntentBits,
@@ -21,8 +16,12 @@ const {
   PermissionsBitField
 } = require("discord.js");
 
-const fs = require("fs");
 const http = require("http");
+
+const supabase = createClient(
+  process.env.SUPABASE_URL,
+  process.env.SUPABASE_ANON_KEY
+);
 
 const PORT = process.env.PORT || 3000;
 
@@ -44,34 +43,8 @@ const client = new Client({
   partials: [Partials.Channel]
 });
 
-function loadDb() {
-  if (!fs.existsSync("db.json")) {
-    fs.writeFileSync(
-      "db.json",
-      JSON.stringify(
-        {
-          nextId: 1,
-          pending: {},
-          confessions: {},
-          pendingReplies: {}
-        },
-        null,
-        2
-      )
-    );
-  }
-
-  return JSON.parse(fs.readFileSync("db.json", "utf8"));
-}
-
-function saveDb(db) {
-  fs.writeFileSync("db.json", JSON.stringify(db, null, 2));
-}
-
-function getNextId(db) {
-  const id = db.nextId || 1;
-  db.nextId = id + 1;
-  return id;
+function generateId() {
+  return Date.now();
 }
 
 function isStaff(member) {
@@ -146,501 +119,588 @@ async function sendLog(title, fields) {
   }
 }
 
-client.once("clientReady", () => {
+async function getConfession(id) {
+  const { data, error } = await supabase
+    .from("confessions")
+    .select("*")
+    .eq("id", Number(id))
+    .single();
+
+  if (error || !data) return null;
+  return data;
+}
+
+async function getReply(id) {
+  const { data, error } = await supabase
+    .from("replies")
+    .select("*")
+    .eq("id", Number(id))
+    .single();
+
+  if (error || !data) return null;
+  return data;
+}
+
+client.once("ready", () => {
   console.log(`✅ Bot online sebagai ${client.user.tag}`);
 });
 
 client.on("interactionCreate", async interaction => {
-  const db = loadDb();
+  try {
+    if (interaction.isChatInputCommand()) {
+      if (interaction.commandName !== "confess") return;
 
-  if (interaction.isChatInputCommand()) {
-    if (interaction.commandName !== "confess") return;
-
-    const row = new ActionRowBuilder().addComponents(
-      new ButtonBuilder()
-        .setCustomId("confess_anon")
-        .setLabel("Anonim")
-        .setStyle(ButtonStyle.Secondary),
-
-      new ButtonBuilder()
-        .setCustomId("confess_name")
-        .setLabel("Tampilkan Nama")
-        .setStyle(ButtonStyle.Primary)
-    );
-
-    return interaction.reply({
-      content: "Pilih mode confess kamu:",
-      components: [row],
-      ephemeral: true
-    });
-  }
-
-  if (interaction.isButton()) {
-    if (interaction.customId === "confess_anon" || interaction.customId === "confess_name") {
-      const anonymous = interaction.customId === "confess_anon";
-
-      const modal = new ModalBuilder()
-        .setCustomId(`confessmodal_${anonymous ? "anon" : "name"}`)
-        .setTitle("Submit Confess");
-
-      const targetInput = new TextInputBuilder()
-        .setCustomId("target")
-        .setLabel("Ditujukan ke siapa?")
-        .setPlaceholder("Bisa mention @orang atau tulis bebas")
-        .setStyle(TextInputStyle.Short)
-        .setRequired(true);
-
-      const confessionInput = new TextInputBuilder()
-        .setCustomId("confession")
-        .setLabel("Isi confess")
-        .setStyle(TextInputStyle.Paragraph)
-        .setRequired(true);
-
-      const attachmentInput = new TextInputBuilder()
-        .setCustomId("attachment")
-        .setLabel("Attachment URL (opsional)")
-        .setPlaceholder("Link gambar / video / meme")
-        .setStyle(TextInputStyle.Short)
-        .setRequired(false);
-
-      modal.addComponents(
-        new ActionRowBuilder().addComponents(targetInput),
-        new ActionRowBuilder().addComponents(confessionInput),
-        new ActionRowBuilder().addComponents(attachmentInput)
-      );
-
-      return interaction.showModal(modal);
-    }
-
-    if (interaction.customId.startsWith("review_accept_")) {
-      if (!isStaff(interaction.member)) {
-        return interaction.reply({
-          content: "❌ Kamu bukan staff.",
-          ephemeral: true
-        });
-      }
-
-      const id = interaction.customId.replace("review_accept_", "");
-      const confession = db.pending[id];
-
-      if (!confession) {
-        return interaction.reply({
-          content: "❌ Data confess tidak ditemukan.",
-          ephemeral: true
-        });
-      }
-
-      const confessChannel = await client.channels
-        .fetch(process.env.CONFESS_CHANNEL_ID)
-        .catch(() => null);
-
-      if (!confessChannel) {
-        return interaction.reply({
-          content: "❌ Channel confess publik tidak ditemukan.",
-          ephemeral: true
-        });
-      }
-
-      const publicEmbed = new EmbedBuilder()
-        .setTitle(
-          confession.anonymous
-            ? `Anonymous Confession (#${id})`
-            : `Confession from ${confession.senderTag} (#${id})`
-        )
-        .setDescription(`"${confession.message}"`)
-        .addFields({
-          name: "Ditujukan kepada",
-          value: normalizeTarget(confession.target)
-        })
-        .setTimestamp();
-
-      applyAttachment(publicEmbed, confession.attachment);
-
-      const replyRow = new ActionRowBuilder().addComponents(
+      const row = new ActionRowBuilder().addComponents(
         new ButtonBuilder()
-          .setCustomId(`reply_${id}`)
-          .setLabel("Balas")
+          .setCustomId("confess_anon")
+          .setLabel("Anonim")
+          .setStyle(ButtonStyle.Secondary),
+
+        new ButtonBuilder()
+          .setCustomId("confess_name")
+          .setLabel("Tampilkan Nama")
           .setStyle(ButtonStyle.Primary)
       );
 
-      const sentMessage = await confessChannel.send({
-        embeds: [publicEmbed],
-        components: [replyRow]
-      });
-
-      const thread = await sentMessage.startThread({
-        name: `Confession Replies #${id}`,
-        autoArchiveDuration: 1440
-      });
-
-      db.confessions[id] = {
-        ...confession,
-        status: "approved",
-        approvedBy: interaction.user.id,
-        approvedByTag: interaction.user.tag,
-        messageId: sentMessage.id,
-        threadId: thread.id,
-        approvedAt: new Date().toISOString()
-      };
-
-      delete db.pending[id];
-      saveDb(db);
-
-      await safeDm(
-        confession.senderId,
-        `✅ Confess kamu (#${id}) sudah di-approve dan dikirim ke channel confess.`
-      );
-
-      await sendLog("✅ Confession Approved", [
-        { name: "ID", value: `#${id}`, inline: true },
-        { name: "Approved By", value: `${interaction.user.tag}`, inline: true },
-        { name: "Sender", value: `${confession.senderTag}\n${confession.senderId}` },
-        { name: "Message", value: confession.message }
-      ]);
-
-      return interaction.update({
-        content: `✅ Confession #${id} approved.`,
-        embeds: [],
-        components: []
+      return interaction.reply({
+        content: "Pilih mode confess kamu:",
+        components: [row],
+        ephemeral: true
       });
     }
 
-    if (interaction.customId.startsWith("review_deny_")) {
-      if (!isStaff(interaction.member)) {
-        return interaction.reply({
-          content: "❌ Kamu bukan staff.",
-          ephemeral: true
-        });
+    if (interaction.isButton()) {
+      if (
+        interaction.customId === "confess_anon" ||
+        interaction.customId === "confess_name"
+      ) {
+        const anonymous = interaction.customId === "confess_anon";
+
+        const modal = new ModalBuilder()
+          .setCustomId(`confessmodal_${anonymous ? "anon" : "name"}`)
+          .setTitle("Submit Confess");
+
+        const targetInput = new TextInputBuilder()
+          .setCustomId("target")
+          .setLabel("Ditujukan ke siapa?")
+          .setPlaceholder("Bisa mention @orang atau tulis bebas")
+          .setStyle(TextInputStyle.Short)
+          .setRequired(true);
+
+        const confessionInput = new TextInputBuilder()
+          .setCustomId("confession")
+          .setLabel("Isi confess")
+          .setStyle(TextInputStyle.Paragraph)
+          .setRequired(true);
+
+        const attachmentInput = new TextInputBuilder()
+          .setCustomId("attachment")
+          .setLabel("Attachment URL (opsional)")
+          .setPlaceholder("Link gambar / video / meme")
+          .setStyle(TextInputStyle.Short)
+          .setRequired(false);
+
+        modal.addComponents(
+          new ActionRowBuilder().addComponents(targetInput),
+          new ActionRowBuilder().addComponents(confessionInput),
+          new ActionRowBuilder().addComponents(attachmentInput)
+        );
+
+        return interaction.showModal(modal);
       }
 
-      const id = interaction.customId.replace("review_deny_", "");
-      const confession = db.pending[id];
+      if (interaction.customId.startsWith("review_accept_")) {
+        if (!isStaff(interaction.member)) {
+          return interaction.reply({
+            content: "❌ Kamu bukan staff.",
+            ephemeral: true
+          });
+        }
 
-      if (!confession) {
-        return interaction.reply({
-          content: "❌ Data confess tidak ditemukan.",
-          ephemeral: true
-        });
-      }
+        const id = interaction.customId.replace("review_accept_", "");
+        const confession = await getConfession(id);
 
-      delete db.pending[id];
-      saveDb(db);
+        if (!confession || confession.status !== "pending") {
+          return interaction.reply({
+            content: "❌ Data confess tidak ditemukan atau sudah diproses.",
+            ephemeral: true
+          });
+        }
 
-      await safeDm(confession.senderId, `❌ Confess kamu (#${id}) ditolak oleh staff.`);
+        const confessChannel = await client.channels
+          .fetch(process.env.CONFESS_CHANNEL_ID)
+          .catch(() => null);
 
-      await sendLog("❌ Confession Denied", [
-        { name: "ID", value: `#${id}`, inline: true },
-        { name: "Denied By", value: `${interaction.user.tag}`, inline: true },
-        { name: "Sender", value: `${confession.senderTag}\n${confession.senderId}` },
-        { name: "Message", value: confession.message }
-      ]);
+        if (!confessChannel) {
+          return interaction.reply({
+            content: "❌ Channel confess publik tidak ditemukan.",
+            ephemeral: true
+          });
+        }
 
-      return interaction.update({
-        content: `❌ Confession #${id} denied.`,
-        embeds: [],
-        components: []
-      });
-    }
-
-    if (interaction.customId.startsWith("reply_")) {
-      const confessionId = interaction.customId.replace("reply_", "");
-      const confession = db.confessions[confessionId];
-
-      if (!confession) {
-        return interaction.reply({
-          content: "❌ Confess ini belum ditemukan.",
-          ephemeral: true
-        });
-      }
-
-      const modal = new ModalBuilder()
-        .setCustomId(`replymodal_${confessionId}`)
-        .setTitle(`Reply Confession #${confessionId}`);
-
-      const replyInput = new TextInputBuilder()
-        .setCustomId("reply")
-        .setLabel("Isi balasan")
-        .setStyle(TextInputStyle.Paragraph)
-        .setRequired(true);
-
-      const attachmentInput = new TextInputBuilder()
-        .setCustomId("attachment")
-        .setLabel("Attachment URL (opsional)")
-        .setPlaceholder("Link gambar / video / meme")
-        .setStyle(TextInputStyle.Short)
-        .setRequired(false);
-
-      modal.addComponents(
-        new ActionRowBuilder().addComponents(replyInput),
-        new ActionRowBuilder().addComponents(attachmentInput)
-      );
-
-      return interaction.showModal(modal);
-    }
-
-    if (interaction.customId.startsWith("reply_accept_")) {
-      if (!isStaff(interaction.member)) {
-        return interaction.reply({
-          content: "❌ Kamu bukan staff.",
-          ephemeral: true
-        });
-      }
-
-      const replyId = interaction.customId.replace("reply_accept_", "");
-      const reply = db.pendingReplies[replyId];
-
-      if (!reply) {
-        return interaction.reply({
-          content: "❌ Data reply tidak ditemukan.",
-          ephemeral: true
-        });
-      }
-
-      const parent = db.confessions[reply.confessionId];
-
-      if (!parent) {
-        return interaction.reply({
-          content: "❌ Confess utama tidak ditemukan.",
-          ephemeral: true
-        });
-      }
-
-      const thread = await client.channels.fetch(parent.threadId).catch(() => null);
-
-      if (!thread) {
-        return interaction.reply({
-          content: "❌ Thread confess tidak ditemukan.",
-          ephemeral: true
-        });
-      }
-
-      const replyEmbed = new EmbedBuilder()
-        .setTitle(`Anonymous Reply (#${replyId})`)
-        .setDescription(`"${reply.message}"`)
-        .setTimestamp();
-
-      applyAttachment(replyEmbed, reply.attachment);
-
-      await thread.send({ embeds: [replyEmbed] });
-
-      delete db.pendingReplies[replyId];
-      saveDb(db);
-
-      await safeDm(
-        reply.senderId,
-        `✅ Reply kamu untuk confession #${reply.confessionId} sudah di-approve.`
-      );
-
-      await sendLog("✅ Reply Approved", [
-        { name: "Reply ID", value: `#${replyId}`, inline: true },
-        { name: "Confession ID", value: `#${reply.confessionId}`, inline: true },
-        { name: "Approved By", value: interaction.user.tag, inline: true },
-        { name: "Sender", value: `${reply.senderTag}\n${reply.senderId}` },
-        { name: "Reply", value: reply.message }
-      ]);
-
-      return interaction.update({
-        content: `✅ Reply #${replyId} approved.`,
-        embeds: [],
-        components: []
-      });
-    }
-
-    if (interaction.customId.startsWith("reply_deny_")) {
-      if (!isStaff(interaction.member)) {
-        return interaction.reply({
-          content: "❌ Kamu bukan staff.",
-          ephemeral: true
-        });
-      }
-
-      const replyId = interaction.customId.replace("reply_deny_", "");
-      const reply = db.pendingReplies[replyId];
-
-      if (!reply) {
-        return interaction.reply({
-          content: "❌ Data reply tidak ditemukan.",
-          ephemeral: true
-        });
-      }
-
-      delete db.pendingReplies[replyId];
-      saveDb(db);
-
-      await safeDm(reply.senderId, `❌ Reply kamu (#${replyId}) ditolak oleh staff.`);
-
-      await sendLog("❌ Reply Denied", [
-        { name: "Reply ID", value: `#${replyId}`, inline: true },
-        { name: "Confession ID", value: `#${reply.confessionId}`, inline: true },
-        { name: "Denied By", value: interaction.user.tag, inline: true },
-        { name: "Sender", value: `${reply.senderTag}\n${reply.senderId}` },
-        { name: "Reply", value: reply.message }
-      ]);
-
-      return interaction.update({
-        content: `❌ Reply #${replyId} denied.`,
-        embeds: [],
-        components: []
-      });
-    }
-  }
-
-  if (interaction.isModalSubmit()) {
-    if (interaction.customId.startsWith("confessmodal_")) {
-      const anonymous = interaction.customId.endsWith("_anon");
-
-      const id = getNextId(db);
-      const target = interaction.fields.getTextInputValue("target");
-      const message = interaction.fields.getTextInputValue("confession");
-      const attachment = interaction.fields.getTextInputValue("attachment") || "";
-
-      db.pending[id] = {
-        id,
-        senderId: interaction.user.id,
-        senderTag: interaction.user.tag,
-        anonymous,
-        target,
-        message,
-        attachment,
-        createdAt: new Date().toISOString()
-      };
-
-      saveDb(db);
-
-      const reviewChannel = await client.channels
-        .fetch(process.env.REVIEW_CHANNEL_ID)
-        .catch(() => null);
-
-      if (!reviewChannel) {
-        return interaction.reply({
-          content: "❌ Channel review staff tidak ditemukan.",
-          ephemeral: true
-        });
-      }
-
-      const reviewEmbed = new EmbedBuilder()
-        .setTitle(`Confession Awaiting Review (#${id})`)
-        .setDescription(`"${message}"`)
-        .addFields(
-          {
+        const publicEmbed = new EmbedBuilder()
+          .setTitle(
+            confession.anonymous
+              ? `Anonymous Confession (#${id})`
+              : `Confession from ${confession.sender_tag} (#${id})`
+          )
+          .setDescription(`"${confession.message}"`)
+          .addFields({
             name: "Ditujukan kepada",
-            value: normalizeTarget(target)
-          },
+            value: normalizeTarget(confession.target)
+          })
+          .setTimestamp();
+
+        applyAttachment(publicEmbed, confession.attachment);
+
+        const replyRow = new ActionRowBuilder().addComponents(
+          new ButtonBuilder()
+            .setCustomId(`reply_${id}`)
+            .setLabel("Balas")
+            .setStyle(ButtonStyle.Primary)
+        );
+
+        const sentMessage = await confessChannel.send({
+          embeds: [publicEmbed],
+          components: [replyRow]
+        });
+
+        const thread = await sentMessage.startThread({
+          name: `Confession Replies #${id}`,
+          autoArchiveDuration: 1440
+        });
+
+        await supabase
+          .from("confessions")
+          .update({
+            status: "approved",
+            message_id: sentMessage.id,
+            thread_id: thread.id,
+            approved_by: interaction.user.id,
+            approved_by_tag: interaction.user.tag,
+            approved_at: new Date().toISOString()
+          })
+          .eq("id", Number(id));
+
+        await safeDm(
+          confession.sender_id,
+          `✅ Confess kamu (#${id}) sudah di-approve dan dikirim ke channel confess.`
+        );
+
+        await sendLog("✅ Confession Approved", [
+          { name: "ID", value: `#${id}`, inline: true },
+          { name: "Approved By", value: interaction.user.tag, inline: true },
           {
-            name: "Mode",
-            value: anonymous ? "Anonim" : `Tampilkan nama: ${interaction.user.tag}`,
+            name: "Sender",
+            value: `${confession.sender_tag}\n${confession.sender_id}`
+          },
+          { name: "Message", value: confession.message }
+        ]);
+
+        return interaction.update({
+          content: `✅ Confession #${id} approved.`,
+          embeds: [],
+          components: []
+        });
+      }
+
+      if (interaction.customId.startsWith("review_deny_")) {
+        if (!isStaff(interaction.member)) {
+          return interaction.reply({
+            content: "❌ Kamu bukan staff.",
+            ephemeral: true
+          });
+        }
+
+        const id = interaction.customId.replace("review_deny_", "");
+        const confession = await getConfession(id);
+
+        if (!confession || confession.status !== "pending") {
+          return interaction.reply({
+            content: "❌ Data confess tidak ditemukan atau sudah diproses.",
+            ephemeral: true
+          });
+        }
+
+        await supabase
+          .from("confessions")
+          .update({
+            status: "denied",
+            approved_by: interaction.user.id,
+            approved_by_tag: interaction.user.tag,
+            approved_at: new Date().toISOString()
+          })
+          .eq("id", Number(id));
+
+        await safeDm(
+          confession.sender_id,
+          `❌ Confess kamu (#${id}) ditolak oleh staff.`
+        );
+
+        await sendLog("❌ Confession Denied", [
+          { name: "ID", value: `#${id}`, inline: true },
+          { name: "Denied By", value: interaction.user.tag, inline: true },
+          {
+            name: "Sender",
+            value: `${confession.sender_tag}\n${confession.sender_id}`
+          },
+          { name: "Message", value: confession.message }
+        ]);
+
+        return interaction.update({
+          content: `❌ Confession #${id} denied.`,
+          embeds: [],
+          components: []
+        });
+      }
+
+      if (interaction.customId.startsWith("reply_")) {
+        const confessionId = interaction.customId.replace("reply_", "");
+        const confession = await getConfession(confessionId);
+
+        if (!confession || confession.status !== "approved") {
+          return interaction.reply({
+            content: "❌ Confession ini belum ditemukan.",
+            ephemeral: true
+          });
+        }
+
+        const modal = new ModalBuilder()
+          .setCustomId(`replymodal_${confessionId}`)
+          .setTitle(`Reply Confession #${confessionId}`);
+
+        const replyInput = new TextInputBuilder()
+          .setCustomId("reply")
+          .setLabel("Isi balasan")
+          .setStyle(TextInputStyle.Paragraph)
+          .setRequired(true);
+
+        const attachmentInput = new TextInputBuilder()
+          .setCustomId("attachment")
+          .setLabel("Attachment URL (opsional)")
+          .setPlaceholder("Link gambar / video / meme")
+          .setStyle(TextInputStyle.Short)
+          .setRequired(false);
+
+        modal.addComponents(
+          new ActionRowBuilder().addComponents(replyInput),
+          new ActionRowBuilder().addComponents(attachmentInput)
+        );
+
+        return interaction.showModal(modal);
+      }
+
+      if (interaction.customId.startsWith("reply_accept_")) {
+        if (!isStaff(interaction.member)) {
+          return interaction.reply({
+            content: "❌ Kamu bukan staff.",
+            ephemeral: true
+          });
+        }
+
+        const replyId = interaction.customId.replace("reply_accept_", "");
+        const reply = await getReply(replyId);
+
+        if (!reply || reply.status !== "pending") {
+          return interaction.reply({
+            content: "❌ Data reply tidak ditemukan atau sudah diproses.",
+            ephemeral: true
+          });
+        }
+
+        const parent = await getConfession(reply.confession_id);
+
+        if (!parent || !parent.thread_id) {
+          return interaction.reply({
+            content: "❌ Confess utama atau thread tidak ditemukan.",
+            ephemeral: true
+          });
+        }
+
+        const thread = await client.channels
+          .fetch(parent.thread_id)
+          .catch(() => null);
+
+        if (!thread) {
+          return interaction.reply({
+            content: "❌ Thread confess tidak ditemukan.",
+            ephemeral: true
+          });
+        }
+
+        const replyEmbed = new EmbedBuilder()
+          .setTitle(`Anonymous Reply (#${replyId})`)
+          .setDescription(`"${reply.message}"`)
+          .setTimestamp();
+
+        applyAttachment(replyEmbed, reply.attachment);
+
+        await thread.send({ embeds: [replyEmbed] });
+
+        await supabase
+          .from("replies")
+          .update({ status: "approved" })
+          .eq("id", Number(replyId));
+
+        await safeDm(
+          reply.sender_id,
+          `✅ Reply kamu untuk confession #${reply.confession_id} sudah di-approve.`
+        );
+
+        await sendLog("✅ Reply Approved", [
+          { name: "Reply ID", value: `#${replyId}`, inline: true },
+          {
+            name: "Confession ID",
+            value: `#${reply.confession_id}`,
             inline: true
           },
+          { name: "Approved By", value: interaction.user.tag, inline: true },
+          { name: "Sender", value: `${reply.sender_tag}\n${reply.sender_id}` },
+          { name: "Reply", value: reply.message }
+        ]);
+
+        return interaction.update({
+          content: `✅ Reply #${replyId} approved.`,
+          embeds: [],
+          components: []
+        });
+      }
+
+      if (interaction.customId.startsWith("reply_deny_")) {
+        if (!isStaff(interaction.member)) {
+          return interaction.reply({
+            content: "❌ Kamu bukan staff.",
+            ephemeral: true
+          });
+        }
+
+        const replyId = interaction.customId.replace("reply_deny_", "");
+        const reply = await getReply(replyId);
+
+        if (!reply || reply.status !== "pending") {
+          return interaction.reply({
+            content: "❌ Data reply tidak ditemukan atau sudah diproses.",
+            ephemeral: true
+          });
+        }
+
+        await supabase
+          .from("replies")
+          .update({ status: "denied" })
+          .eq("id", Number(replyId));
+
+        await safeDm(
+          reply.sender_id,
+          `❌ Reply kamu (#${replyId}) ditolak oleh staff.`
+        );
+
+        await sendLog("❌ Reply Denied", [
+          { name: "Reply ID", value: `#${replyId}`, inline: true },
           {
-            name: "Sender ID",
-            value: interaction.user.id,
+            name: "Confession ID",
+            value: `#${reply.confession_id}`,
             inline: true
-          }
-        )
-        .setTimestamp();
+          },
+          { name: "Denied By", value: interaction.user.tag, inline: true },
+          { name: "Sender", value: `${reply.sender_tag}\n${reply.sender_id}` },
+          { name: "Reply", value: reply.message }
+        ]);
 
-      applyAttachment(reviewEmbed, attachment);
-
-      const row = new ActionRowBuilder().addComponents(
-        new ButtonBuilder()
-          .setCustomId(`review_accept_${id}`)
-          .setLabel("Approve")
-          .setStyle(ButtonStyle.Success),
-
-        new ButtonBuilder()
-          .setCustomId(`review_deny_${id}`)
-          .setLabel("Deny")
-          .setStyle(ButtonStyle.Danger)
-      );
-
-      await reviewChannel.send({
-        embeds: [reviewEmbed],
-        components: [row]
-      });
-
-      return interaction.reply({
-        content: `✅ Confession kamu sudah masuk review. Jika di-approve, akan dikirim ke channel confess. (#${id})`,
-        ephemeral: true
-      });
+        return interaction.update({
+          content: `❌ Reply #${replyId} denied.`,
+          embeds: [],
+          components: []
+        });
+      }
     }
 
-    if (interaction.customId.startsWith("replymodal_")) {
-      const confessionId = interaction.customId.replace("replymodal_", "");
-      const parent = db.confessions[confessionId];
+    if (interaction.isModalSubmit()) {
+      if (interaction.customId.startsWith("confessmodal_")) {
+        const anonymous = interaction.customId.endsWith("_anon");
 
-      if (!parent) {
+        const id = generateId();
+        const target = interaction.fields.getTextInputValue("target");
+        const message = interaction.fields.getTextInputValue("confession");
+        const attachment =
+          interaction.fields.getTextInputValue("attachment") || "";
+
+        const { error } = await supabase.from("confessions").insert({
+          id,
+          sender_id: interaction.user.id,
+          sender_tag: interaction.user.tag,
+          anonymous,
+          target,
+          message,
+          attachment,
+          status: "pending"
+        });
+
+        if (error) {
+          console.error(error);
+          return interaction.reply({
+            content: "❌ Gagal menyimpan confession ke database.",
+            ephemeral: true
+          });
+        }
+
+        const reviewChannel = await client.channels
+          .fetch(process.env.REVIEW_CHANNEL_ID)
+          .catch(() => null);
+
+        if (!reviewChannel) {
+          return interaction.reply({
+            content: "❌ Channel review staff tidak ditemukan.",
+            ephemeral: true
+          });
+        }
+
+        const reviewEmbed = new EmbedBuilder()
+          .setTitle(`Confession Awaiting Review (#${id})`)
+          .setDescription(`"${message}"`)
+          .addFields(
+            {
+              name: "Ditujukan kepada",
+              value: normalizeTarget(target)
+            },
+            {
+              name: "Mode",
+              value: anonymous
+                ? "Anonim"
+                : `Tampilkan nama: ${interaction.user.tag}`,
+              inline: true
+            },
+            {
+              name: "Sender ID",
+              value: interaction.user.id,
+              inline: true
+            }
+          )
+          .setTimestamp();
+
+        applyAttachment(reviewEmbed, attachment);
+
+        const row = new ActionRowBuilder().addComponents(
+          new ButtonBuilder()
+            .setCustomId(`review_accept_${id}`)
+            .setLabel("Approve")
+            .setStyle(ButtonStyle.Success),
+
+          new ButtonBuilder()
+            .setCustomId(`review_deny_${id}`)
+            .setLabel("Deny")
+            .setStyle(ButtonStyle.Danger)
+        );
+
+        await reviewChannel.send({
+          embeds: [reviewEmbed],
+          components: [row]
+        });
+
         return interaction.reply({
-          content: "❌ Confession utama tidak ditemukan.",
+          content: `✅ Confession kamu sudah masuk review. Jika di-approve, akan dikirim ke channel confess. (#${id})`,
           ephemeral: true
         });
       }
 
-      const replyId = getNextId(db);
-      const message = interaction.fields.getTextInputValue("reply");
-      const attachment = interaction.fields.getTextInputValue("attachment") || "";
+      if (interaction.customId.startsWith("replymodal_")) {
+        const confessionId = interaction.customId.replace("replymodal_", "");
+        const parent = await getConfession(confessionId);
 
-      db.pendingReplies[replyId] = {
-        id: replyId,
-        confessionId,
-        senderId: interaction.user.id,
-        senderTag: interaction.user.tag,
-        message,
-        attachment,
-        createdAt: new Date().toISOString()
-      };
+        if (!parent || parent.status !== "approved") {
+          return interaction.reply({
+            content: "❌ Confession utama tidak ditemukan.",
+            ephemeral: true
+          });
+        }
 
-      saveDb(db);
+        const replyId = generateId();
+        const message = interaction.fields.getTextInputValue("reply");
+        const attachment =
+          interaction.fields.getTextInputValue("attachment") || "";
 
-      const reviewChannel = await client.channels
-        .fetch(process.env.REVIEW_CHANNEL_ID)
-        .catch(() => null);
+        const { error } = await supabase.from("replies").insert({
+          id: replyId,
+          confession_id: Number(confessionId),
+          sender_id: interaction.user.id,
+          sender_tag: interaction.user.tag,
+          message,
+          attachment,
+          status: "pending"
+        });
 
-      if (!reviewChannel) {
+        if (error) {
+          console.error(error);
+          return interaction.reply({
+            content: "❌ Gagal menyimpan reply ke database.",
+            ephemeral: true
+          });
+        }
+
+        const reviewChannel = await client.channels
+          .fetch(process.env.REVIEW_CHANNEL_ID)
+          .catch(() => null);
+
+        if (!reviewChannel) {
+          return interaction.reply({
+            content: "❌ Channel review staff tidak ditemukan.",
+            ephemeral: true
+          });
+        }
+
+        const reviewEmbed = new EmbedBuilder()
+          .setTitle(`Reply Awaiting Review (#${replyId})`)
+          .setDescription(`"${message}"`)
+          .addFields(
+            {
+              name: "Untuk Confession",
+              value: `#${confessionId}`
+            },
+            {
+              name: "Sender ID",
+              value: interaction.user.id
+            }
+          )
+          .setTimestamp();
+
+        applyAttachment(reviewEmbed, attachment);
+
+        const row = new ActionRowBuilder().addComponents(
+          new ButtonBuilder()
+            .setCustomId(`reply_accept_${replyId}`)
+            .setLabel("Approve")
+            .setStyle(ButtonStyle.Success),
+
+          new ButtonBuilder()
+            .setCustomId(`reply_deny_${replyId}`)
+            .setLabel("Deny")
+            .setStyle(ButtonStyle.Danger)
+        );
+
+        await reviewChannel.send({
+          embeds: [reviewEmbed],
+          components: [row]
+        });
+
         return interaction.reply({
-          content: "❌ Channel review staff tidak ditemukan.",
+          content: `✅ Reply kamu sudah masuk review staff. (#${replyId})`,
           ephemeral: true
         });
       }
+    }
+  } catch (error) {
+    console.error("Interaction error:", error);
 
-      const reviewEmbed = new EmbedBuilder()
-        .setTitle(`Reply Awaiting Review (#${replyId})`)
-        .setDescription(`"${message}"`)
-        .addFields(
-          {
-            name: "Untuk Confession",
-            value: `#${confessionId}`
-          },
-          {
-            name: "Sender ID",
-            value: interaction.user.id
-          }
-        )
-        .setTimestamp();
-
-      applyAttachment(reviewEmbed, attachment);
-
-      const row = new ActionRowBuilder().addComponents(
-        new ButtonBuilder()
-          .setCustomId(`reply_accept_${replyId}`)
-          .setLabel("Approve")
-          .setStyle(ButtonStyle.Success),
-
-        new ButtonBuilder()
-          .setCustomId(`reply_deny_${replyId}`)
-          .setLabel("Deny")
-          .setStyle(ButtonStyle.Danger)
-      );
-
-      await reviewChannel.send({
-        embeds: [reviewEmbed],
-        components: [row]
-      });
-
-      return interaction.reply({
-        content: `✅ Reply kamu sudah masuk review staff. (#${replyId})`,
+    if (interaction.replied || interaction.deferred) {
+      return interaction.followUp({
+        content: "❌ Terjadi error saat memproses interaction.",
         ephemeral: true
       });
     }
+
+    return interaction.reply({
+      content: "❌ Terjadi error saat memproses interaction.",
+      ephemeral: true
+    });
   }
 });
 
