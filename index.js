@@ -1,7 +1,6 @@
 require("dotenv").config();
 
 const { createClient } = require("@supabase/supabase-js");
-
 const {
   Client,
   GatewayIntentBits,
@@ -147,9 +146,10 @@ client.once("ready", () => {
 
 client.on("interactionCreate", async interaction => {
   try {
+    // Slash command /confess
     if (interaction.isChatInputCommand()) {
       if (interaction.commandName !== "confess") return;
-  
+
       const row = new ActionRowBuilder().addComponents(
         new ButtonBuilder()
           .setCustomId("confess_anon")
@@ -160,15 +160,16 @@ client.on("interactionCreate", async interaction => {
           .setCustomId("confess_name")
           .setLabel("Tampilkan Nama")
           .setStyle(ButtonStyle.Primary)
-  );
+      );
 
       return interaction.reply({
         content: "Pilih mode confess kamu:",
         components: [row],
         ephemeral: true
-  });
-}
+      });
+    }
 
+    // Button interactions
     if (interaction.isButton()) {
       if (
         interaction.customId === "confess_anon" ||
@@ -217,13 +218,16 @@ client.on("interactionCreate", async interaction => {
           });
         }
 
+        await interaction.deferUpdate();
+
         const id = interaction.customId.replace("review_accept_", "");
         const confession = await getConfession(id);
 
         if (!confession || confession.status !== "pending") {
-          return interaction.reply({
+          return interaction.message.edit({
             content: "❌ Data confess tidak ditemukan atau sudah diproses.",
-            ephemeral: true
+            embeds: [],
+            components: []
           });
         }
 
@@ -232,9 +236,10 @@ client.on("interactionCreate", async interaction => {
           .catch(() => null);
 
         if (!confessChannel) {
-          return interaction.editReply({
+          return interaction.message.edit({
             content: "❌ Channel confess publik tidak ditemukan.",
-            ephemeral: true
+            embeds: [],
+            components: []
           });
         }
 
@@ -297,7 +302,7 @@ client.on("interactionCreate", async interaction => {
           { name: "Message", value: confession.message }
         ]);
 
-        return interaction.update({
+        return interaction.message.edit({
           content: `✅ Confession #${id} approved.`,
           embeds: [],
           components: []
@@ -306,19 +311,22 @@ client.on("interactionCreate", async interaction => {
 
       if (interaction.customId.startsWith("review_deny_")) {
         if (!isStaff(interaction.member)) {
-          return interaction.editReply({
+          return interaction.reply({
             content: "❌ Kamu bukan staff.",
             ephemeral: true
           });
         }
 
+        await interaction.deferUpdate();
+
         const id = interaction.customId.replace("review_deny_", "");
         const confession = await getConfession(id);
 
         if (!confession || confession.status !== "pending") {
-          return interaction.editReply({
+          return interaction.message.edit({
             content: "❌ Data confess tidak ditemukan atau sudah diproses.",
-            ephemeral: true
+            embeds: [],
+            components: []
           });
         }
 
@@ -347,7 +355,7 @@ client.on("interactionCreate", async interaction => {
           { name: "Message", value: confession.message }
         ]);
 
-        return interaction.update({
+        return interaction.message.edit({
           content: `❌ Confession #${id} denied.`,
           embeds: [],
           components: []
@@ -359,7 +367,7 @@ client.on("interactionCreate", async interaction => {
         const confession = await getConfession(confessionId);
 
         if (!confession || confession.status !== "approved") {
-          return interaction.editReply({
+          return interaction.reply({
             content: "❌ Confession ini belum ditemukan.",
             ephemeral: true
           });
@@ -392,7 +400,7 @@ client.on("interactionCreate", async interaction => {
 
       if (interaction.customId.startsWith("reply_accept_")) {
         if (!isStaff(interaction.member)) {
-          return interaction.editReply({
+          return interaction.reply({
             content: "❌ Kamu bukan staff.",
             ephemeral: true
           });
@@ -404,18 +412,20 @@ client.on("interactionCreate", async interaction => {
         const reply = await getReply(replyId);
 
         if (!reply || reply.status !== "pending") {
-          return interaction.editReply({
+          return interaction.message.edit({
             content: "❌ Data reply tidak ditemukan atau sudah diproses.",
-            ephemeral: true
+            embeds: [],
+            components: []
           });
         }
 
         const parent = await getConfession(reply.confession_id);
 
         if (!parent || !parent.thread_id) {
-          return interaction.editReply({
+          return interaction.message.edit({
             content: "❌ Confess utama atau thread tidak ditemukan.",
-            ephemeral: true
+            embeds: [],
+            components: []
           });
         }
 
@@ -424,9 +434,10 @@ client.on("interactionCreate", async interaction => {
           .catch(() => null);
 
         if (!thread) {
-          return interaction.editReply({
+          return interaction.message.edit({
             content: "❌ Thread confess tidak ditemukan.",
-            ephemeral: true
+            embeds: [],
+            components: []
           });
         }
 
@@ -470,19 +481,22 @@ client.on("interactionCreate", async interaction => {
 
       if (interaction.customId.startsWith("reply_deny_")) {
         if (!isStaff(interaction.member)) {
-          return interaction.editReply({
+          return interaction.reply({
             content: "❌ Kamu bukan staff.",
             ephemeral: true
           });
         }
 
+        await interaction.deferUpdate();
+
         const replyId = interaction.customId.replace("reply_deny_", "");
         const reply = await getReply(replyId);
 
         if (!reply || reply.status !== "pending") {
-          return interaction.editReply({
+          return interaction.message.edit({
             content: "❌ Data reply tidak ditemukan atau sudah diproses.",
-            ephemeral: true
+            embeds: [],
+            components: []
           });
         }
 
@@ -515,11 +529,12 @@ client.on("interactionCreate", async interaction => {
         });
       }
     }
-    
-        if (interaction.isModalSubmit()) {
-          await interaction.deferReply({ ephemeral: true });
 
-          if (interaction.customId.startsWith("confessmodal_")) {
+    // Modal submit
+    if (interaction.isModalSubmit()) {
+      await interaction.deferReply({ ephemeral: true });
+
+      if (interaction.customId.startsWith("confessmodal_")) {
         const anonymous = interaction.customId.endsWith("_anon");
 
         const id = generateId();
@@ -542,8 +557,7 @@ client.on("interactionCreate", async interaction => {
         if (error) {
           console.error(error);
           return interaction.editReply({
-            content: "❌ Gagal menyimpan confession ke database.",
-            ephemeral: true
+            content: "❌ Gagal menyimpan confession ke database."
           });
         }
 
@@ -553,8 +567,7 @@ client.on("interactionCreate", async interaction => {
 
         if (!reviewChannel) {
           return interaction.editReply({
-            content: "❌ Channel review staff tidak ditemukan.",
-            ephemeral: true
+            content: "❌ Channel review staff tidak ditemukan."
           });
         }
 
@@ -601,8 +614,7 @@ client.on("interactionCreate", async interaction => {
         });
 
         return interaction.editReply({
-          content: `✅ Confession kamu sudah masuk review. Jika di-approve, akan dikirim ke channel confess. (#${id})`,
-          ephemeral: true
+          content: `✅ Confession kamu sudah masuk review. Jika di-approve, akan dikirim ke channel confess. (#${id})`
         });
       }
 
@@ -612,8 +624,7 @@ client.on("interactionCreate", async interaction => {
 
         if (!parent || parent.status !== "approved") {
           return interaction.editReply({
-            content: "❌ Confession utama tidak ditemukan.",
-            ephemeral: true
+            content: "❌ Confession utama tidak ditemukan."
           });
         }
 
@@ -635,8 +646,7 @@ client.on("interactionCreate", async interaction => {
         if (error) {
           console.error(error);
           return interaction.editReply({
-            content: "❌ Gagal menyimpan reply ke database.",
-            ephemeral: true
+            content: "❌ Gagal menyimpan reply ke database."
           });
         }
 
@@ -646,8 +656,7 @@ client.on("interactionCreate", async interaction => {
 
         if (!reviewChannel) {
           return interaction.editReply({
-            content: "❌ Channel review staff tidak ditemukan.",
-            ephemeral: true
+            content: "❌ Channel review staff tidak ditemukan."
           });
         }
 
@@ -686,29 +695,29 @@ client.on("interactionCreate", async interaction => {
         });
 
         return interaction.editReply({
-          content: `✅ Reply kamu sudah masuk review staff. (#${replyId})`,
-          ephemeral: true
+          content: `✅ Reply kamu sudah masuk review staff. (#${replyId})`
         });
       }
     }
   } catch (error) {
     console.error("Interaction error:", error);
 
-  try {
-    if (interaction.replied || interaction.deferred) {
-      return interaction.followUp({
+    try {
+      if (interaction.replied || interaction.deferred) {
+        return interaction.followUp({
+          content: "❌ Terjadi error saat memproses interaction.",
+          ephemeral: true
+        });
+      }
+
+      return interaction.reply({
         content: "❌ Terjadi error saat memproses interaction.",
         ephemeral: true
       });
+    } catch (err) {
+      console.error("Gagal mengirim pesan error:", err);
     }
-
-    return interaction.reply({
-      content: "❌ Terjadi error saat memproses interaction.",
-      ephemeral: true
-    });
-  } catch (err) {
-    console.error("Gagal mengirim pesan error:", err);
   }
 });
-  
+
 client.login(process.env.DISCORD_TOKEN);
