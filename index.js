@@ -162,7 +162,7 @@ client.on("interactionCreate", async interaction => {
           .setStyle(ButtonStyle.Primary)
       );
 
-      return interaction.editReply({
+      return interaction.deferReply({
         content: "Pilih mode confess kamu:",
         components: [row],
         ephemeral: true
