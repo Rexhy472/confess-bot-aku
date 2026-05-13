@@ -600,7 +600,7 @@ client.on("interactionCreate", async interaction => {
           components: [row]
         });
 
-        return interaction.reply({
+        return interaction.editReply({
           content: `✅ Confession kamu sudah masuk review. Jika di-approve, akan dikirim ke channel confess. (#${id})`,
           ephemeral: true
         });
