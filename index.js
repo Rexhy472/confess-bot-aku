@@ -709,6 +709,6 @@ client.on("interactionCreate", async interaction => {
   } catch (err) {
     console.error("Gagal mengirim pesan error:", err);
   }
-});
-
+}
+  
 client.login(process.env.DISCORD_TOKEN);
