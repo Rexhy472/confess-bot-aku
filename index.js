@@ -65,10 +65,8 @@ function isStaff(member) {
 
 function normalizeTarget(text) {
   if (!text) return "-";
-
   const mentionMatch = text.match(/^<@!?(\d+)>$/);
   if (mentionMatch) return `<@${mentionMatch[1]}>`;
-
   return text;
 }
 
@@ -88,6 +86,67 @@ function applyAttachment(embed, attachmentUrl) {
       value: url
     });
   }
+}
+
+function makeConfessButtons(confessionId) {
+  return new ActionRowBuilder().addComponents(
+    new ButtonBuilder()
+      .setCustomId("quick_confess")
+      .setLabel("Buat Confess")
+      .setStyle(ButtonStyle.Success),
+
+    new ButtonBuilder()
+      .setCustomId(`reply_${confessionId}`)
+      .setLabel("Balas")
+      .setStyle(ButtonStyle.Primary)
+  );
+}
+
+function makeReplyButton(confessionId) {
+  return new ActionRowBuilder().addComponents(
+    new ButtonBuilder()
+      .setCustomId(`reply_${confessionId}`)
+      .setLabel("Balas")
+      .setStyle(ButtonStyle.Primary)
+  );
+}
+
+function makeReviewButtons(id) {
+  return new ActionRowBuilder().addComponents(
+    new ButtonBuilder()
+      .setCustomId(`review_accept_${id}`)
+      .setLabel("Approve")
+      .setStyle(ButtonStyle.Success),
+
+    new ButtonBuilder()
+      .setCustomId(`review_deny_${id}`)
+      .setLabel("Deny")
+      .setStyle(ButtonStyle.Danger),
+
+    new ButtonBuilder()
+      .setCustomId(`review_denyreason_${id}`)
+      .setLabel("Deny + Reason")
+      .setStyle(ButtonStyle.Secondary)
+  );
+}
+
+function makeReplyReviewButtons(id) {
+  return new ActionRowBuilder().addComponents(
+    new ButtonBuilder()
+      .setCustomId(`reply_accept_${id}`)
+      .setLabel("Approve")
+      .setStyle(ButtonStyle.Success),
+
+    new ButtonBuilder()
+      .setCustomId(`reply_deny_${id}`)
+      .setLabel("Deny")
+      .setStyle(ButtonStyle.Danger),
+
+    new ButtonBuilder()
+      .setCustomId(`reply_denyreason_${id}`)
+      .setLabel("Deny + Reason")
+      .setStyle(ButtonStyle.Secondary)
+  );
 }
 
 async function safeDm(userId, text) {
@@ -140,13 +199,76 @@ async function getReply(id) {
   return data;
 }
 
-client.once("ready", () => {
+async function deleteReviewMessage(channelId, messageId) {
+  try {
+    const channel = await client.channels.fetch(channelId).catch(() => null);
+    if (!channel) return;
+
+    const message = await channel.messages.fetch(messageId).catch(() => null);
+    if (!message) return;
+
+    await message.delete().catch(() => null);
+  } catch {
+    console.log("⚠️ Gagal menghapus pesan review.");
+  }
+}
+
+async function getOrCreateThread(parent) {
+  if (parent.thread_id) {
+    const existingThread = await client.channels
+      .fetch(parent.thread_id)
+      .catch(() => null);
+
+    if (existingThread) return existingThread;
+  }
+
+  const confessChannel = await client.channels
+    .fetch(process.env.CONFESS_CHANNEL_ID)
+    .catch(() => null);
+
+  if (!confessChannel) return null;
+
+  const publicMessage = await confessChannel.messages
+    .fetch(parent.message_id)
+    .catch(() => null);
+
+  if (!publicMessage) return null;
+
+  const thread = await publicMessage.startThread({
+    name: `Confession Replies #${parent.id}`,
+    autoArchiveDuration: 1440
+  });
+
+  await supabase
+    .from("confessions")
+    .update({ thread_id: thread.id })
+    .eq("id", Number(parent.id));
+
+  return thread;
+}
+
+function createDenyReasonModal(type, id, channelId, messageId) {
+  const modal = new ModalBuilder()
+    .setCustomId(`denyreasonmodal_${type}_${id}_${channelId}_${messageId}`)
+    .setTitle("Alasan Penolakan");
+
+  const reasonInput = new TextInputBuilder()
+    .setCustomId("reason")
+    .setLabel("Masukkan alasan")
+    .setStyle(TextInputStyle.Paragraph)
+    .setRequired(true);
+
+  modal.addComponents(new ActionRowBuilder().addComponents(reasonInput));
+
+  return modal;
+}
+
+client.once("clientReady", () => {
   console.log(`✅ Bot online sebagai ${client.user.tag}`);
 });
 
 client.on("interactionCreate", async interaction => {
   try {
-    // Slash command /confess
     if (interaction.isChatInputCommand()) {
       if (interaction.commandName !== "confess") return;
 
@@ -169,8 +291,27 @@ client.on("interactionCreate", async interaction => {
       });
     }
 
-    // Button interactions
     if (interaction.isButton()) {
+      if (interaction.customId === "quick_confess") {
+        const row = new ActionRowBuilder().addComponents(
+          new ButtonBuilder()
+            .setCustomId("confess_anon")
+            .setLabel("Anonim")
+            .setStyle(ButtonStyle.Secondary),
+
+          new ButtonBuilder()
+            .setCustomId("confess_name")
+            .setLabel("Tampilkan Nama")
+            .setStyle(ButtonStyle.Primary)
+        );
+
+        return interaction.reply({
+          content: "Pilih mode confess kamu:",
+          components: [row],
+          ephemeral: true
+        });
+      }
+
       if (
         interaction.customId === "confess_anon" ||
         interaction.customId === "confess_name"
@@ -207,6 +348,7 @@ client.on("interactionCreate", async interaction => {
           new ActionRowBuilder().addComponents(attachmentInput)
         );
 
+        interaction.message?.delete().catch(() => null);
         return interaction.showModal(modal);
       }
 
@@ -224,24 +366,15 @@ client.on("interactionCreate", async interaction => {
         const confession = await getConfession(id);
 
         if (!confession || confession.status !== "pending") {
-          return interaction.message.edit({
-            content: "❌ Data confess tidak ditemukan atau sudah diproses.",
-            embeds: [],
-            components: []
-          });
+          await interaction.message.delete().catch(() => null);
+          return;
         }
 
         const confessChannel = await client.channels
           .fetch(process.env.CONFESS_CHANNEL_ID)
           .catch(() => null);
 
-        if (!confessChannel) {
-          return interaction.message.edit({
-            content: "❌ Channel confess publik tidak ditemukan.",
-            embeds: [],
-            components: []
-          });
-        }
+        if (!confessChannel) return;
 
         const publicEmbed = new EmbedBuilder()
           .setTitle(
@@ -258,21 +391,9 @@ client.on("interactionCreate", async interaction => {
 
         applyAttachment(publicEmbed, confession.attachment);
 
-        const replyRow = new ActionRowBuilder().addComponents(
-          new ButtonBuilder()
-            .setCustomId(`reply_${id}`)
-            .setLabel("Balas")
-            .setStyle(ButtonStyle.Primary)
-        );
-
         const sentMessage = await confessChannel.send({
           embeds: [publicEmbed],
-          components: [replyRow]
-        });
-
-        const thread = await sentMessage.startThread({
-          name: `Confession Replies #${id}`,
-          autoArchiveDuration: 1440
+          components: [makeConfessButtons(id)]
         });
 
         await supabase
@@ -280,7 +401,7 @@ client.on("interactionCreate", async interaction => {
           .update({
             status: "approved",
             message_id: sentMessage.id,
-            thread_id: thread.id,
+            thread_id: null,
             approved_by: interaction.user.id,
             approved_by_tag: interaction.user.tag,
             approved_at: new Date().toISOString()
@@ -295,18 +416,31 @@ client.on("interactionCreate", async interaction => {
         await sendLog("✅ Confession Approved", [
           { name: "ID", value: `#${id}`, inline: true },
           { name: "Approved By", value: interaction.user.tag, inline: true },
-          {
-            name: "Sender",
-            value: `${confession.sender_tag}\n${confession.sender_id}`
-          },
+          { name: "Sender", value: `${confession.sender_tag}\n${confession.sender_id}` },
           { name: "Message", value: confession.message }
         ]);
 
-        return interaction.message.edit({
-          content: `✅ Confession #${id} approved.`,
-          embeds: [],
-          components: []
-        });
+        await interaction.message.delete().catch(() => null);
+        return;
+      }
+
+      if (interaction.customId.startsWith("review_denyreason_")) {
+        if (!isStaff(interaction.member)) {
+          return interaction.reply({
+            content: "❌ Kamu bukan staff.",
+            ephemeral: true
+          });
+        }
+
+        const id = interaction.customId.replace("review_denyreason_", "");
+        return interaction.showModal(
+          createDenyReasonModal(
+            "confession",
+            id,
+            interaction.channelId,
+            interaction.message.id
+          )
+        );
       }
 
       if (interaction.customId.startsWith("review_deny_")) {
@@ -323,11 +457,8 @@ client.on("interactionCreate", async interaction => {
         const confession = await getConfession(id);
 
         if (!confession || confession.status !== "pending") {
-          return interaction.message.edit({
-            content: "❌ Data confess tidak ditemukan atau sudah diproses.",
-            embeds: [],
-            components: []
-          });
+          await interaction.message.delete().catch(() => null);
+          return;
         }
 
         await supabase
@@ -348,24 +479,19 @@ client.on("interactionCreate", async interaction => {
         await sendLog("❌ Confession Denied", [
           { name: "ID", value: `#${id}`, inline: true },
           { name: "Denied By", value: interaction.user.tag, inline: true },
-          {
-            name: "Sender",
-            value: `${confession.sender_tag}\n${confession.sender_id}`
-          },
+          { name: "Sender", value: `${confession.sender_tag}\n${confession.sender_id}` },
           { name: "Message", value: confession.message }
         ]);
 
-        return interaction.message.edit({
-          content: `❌ Confession #${id} denied.`,
-          embeds: [],
-          components: []
-        });
+        await interaction.message.delete().catch(() => null);
+        return;
       }
 
       if (
         interaction.customId.startsWith("reply_") &&
         !interaction.customId.startsWith("reply_accept_") &&
-        !interaction.customId.startsWith("reply_deny_")
+        !interaction.customId.startsWith("reply_deny_") &&
+        !interaction.customId.startsWith("reply_denyreason_")
       ) {
         const confessionId = interaction.customId.replace("reply_", "");
         const confession = await getConfession(confessionId);
@@ -416,34 +542,16 @@ client.on("interactionCreate", async interaction => {
         const reply = await getReply(replyId);
 
         if (!reply || reply.status !== "pending") {
-          return interaction.message.edit({
-            content: "❌ Data reply tidak ditemukan atau sudah diproses.",
-            embeds: [],
-            components: []
-          });
+          await interaction.message.delete().catch(() => null);
+          return;
         }
 
         const parent = await getConfession(reply.confession_id);
 
-        if (!parent || !parent.thread_id) {
-          return interaction.message.edit({
-            content: "❌ Confess utama atau thread tidak ditemukan.",
-            embeds: [],
-            components: []
-          });
-        }
+        if (!parent || !parent.message_id) return;
 
-        const thread = await client.channels
-          .fetch(parent.thread_id)
-          .catch(() => null);
-
-        if (!thread) {
-          return interaction.message.edit({
-            content: "❌ Thread confess tidak ditemukan.",
-            embeds: [],
-            components: []
-          });
-        }
+        const thread = await getOrCreateThread(parent);
+        if (!thread) return;
 
         const replyEmbed = new EmbedBuilder()
           .setTitle(`Anonymous Reply (#${replyId})`)
@@ -452,7 +560,10 @@ client.on("interactionCreate", async interaction => {
 
         applyAttachment(replyEmbed, reply.attachment);
 
-        await thread.send({ embeds: [replyEmbed] });
+        await thread.send({
+          embeds: [replyEmbed],
+          components: [makeReplyButton(reply.confession_id)]
+        });
 
         await supabase
           .from("replies")
@@ -466,21 +577,33 @@ client.on("interactionCreate", async interaction => {
 
         await sendLog("✅ Reply Approved", [
           { name: "Reply ID", value: `#${replyId}`, inline: true },
-          {
-            name: "Confession ID",
-            value: `#${reply.confession_id}`,
-            inline: true
-          },
+          { name: "Confession ID", value: `#${reply.confession_id}`, inline: true },
           { name: "Approved By", value: interaction.user.tag, inline: true },
           { name: "Sender", value: `${reply.sender_tag}\n${reply.sender_id}` },
           { name: "Reply", value: reply.message }
         ]);
 
-        return interaction.message.edit({
-          content: `✅ Reply #${replyId} approved.`,
-          embeds: [],
-          components: []
-        });
+        await interaction.message.delete().catch(() => null);
+        return;
+      }
+
+      if (interaction.customId.startsWith("reply_denyreason_")) {
+        if (!isStaff(interaction.member)) {
+          return interaction.reply({
+            content: "❌ Kamu bukan staff.",
+            ephemeral: true
+          });
+        }
+
+        const replyId = interaction.customId.replace("reply_denyreason_", "");
+        return interaction.showModal(
+          createDenyReasonModal(
+            "reply",
+            replyId,
+            interaction.channelId,
+            interaction.message.id
+          )
+        );
       }
 
       if (interaction.customId.startsWith("reply_deny_")) {
@@ -497,11 +620,8 @@ client.on("interactionCreate", async interaction => {
         const reply = await getReply(replyId);
 
         if (!reply || reply.status !== "pending") {
-          return interaction.message.edit({
-            content: "❌ Data reply tidak ditemukan atau sudah diproses.",
-            embeds: [],
-            components: []
-          });
+          await interaction.message.delete().catch(() => null);
+          return;
         }
 
         await supabase
@@ -516,25 +636,17 @@ client.on("interactionCreate", async interaction => {
 
         await sendLog("❌ Reply Denied", [
           { name: "Reply ID", value: `#${replyId}`, inline: true },
-          {
-            name: "Confession ID",
-            value: `#${reply.confession_id}`,
-            inline: true
-          },
+          { name: "Confession ID", value: `#${reply.confession_id}`, inline: true },
           { name: "Denied By", value: interaction.user.tag, inline: true },
           { name: "Sender", value: `${reply.sender_tag}\n${reply.sender_id}` },
           { name: "Reply", value: reply.message }
         ]);
 
-        return interaction.message.edit({
-          content: `❌ Reply #${replyId} denied.`,
-          embeds: [],
-          components: []
-        });
+        await interaction.message.delete().catch(() => null);
+        return;
       }
     }
 
-    // Modal submit
     if (interaction.isModalSubmit()) {
       await interaction.deferReply({ ephemeral: true });
 
@@ -600,21 +712,9 @@ client.on("interactionCreate", async interaction => {
 
         applyAttachment(reviewEmbed, attachment);
 
-        const row = new ActionRowBuilder().addComponents(
-          new ButtonBuilder()
-            .setCustomId(`review_accept_${id}`)
-            .setLabel("Approve")
-            .setStyle(ButtonStyle.Success),
-
-          new ButtonBuilder()
-            .setCustomId(`review_deny_${id}`)
-            .setLabel("Deny")
-            .setStyle(ButtonStyle.Danger)
-        );
-
         await reviewChannel.send({
           embeds: [reviewEmbed],
-          components: [row]
+          components: [makeReviewButtons(id)]
         });
 
         return interaction.editReply({
@@ -681,26 +781,99 @@ client.on("interactionCreate", async interaction => {
 
         applyAttachment(reviewEmbed, attachment);
 
-        const row = new ActionRowBuilder().addComponents(
-          new ButtonBuilder()
-            .setCustomId(`reply_accept_${replyId}`)
-            .setLabel("Approve")
-            .setStyle(ButtonStyle.Success),
-
-          new ButtonBuilder()
-            .setCustomId(`reply_deny_${replyId}`)
-            .setLabel("Deny")
-            .setStyle(ButtonStyle.Danger)
-        );
-
         await reviewChannel.send({
           embeds: [reviewEmbed],
-          components: [row]
+          components: [makeReplyReviewButtons(replyId)]
         });
 
         return interaction.editReply({
           content: `✅ Reply kamu sudah masuk review staff. (#${replyId})`
         });
+      }
+
+      if (interaction.customId.startsWith("denyreasonmodal_")) {
+        const parts = interaction.customId.split("_");
+        const type = parts[1];
+        const id = parts[2];
+        const channelId = parts[3];
+        const messageId = parts[4];
+        const reason = interaction.fields.getTextInputValue("reason");
+
+        if (type === "confession") {
+          const confession = await getConfession(id);
+
+          if (!confession || confession.status !== "pending") {
+            await deleteReviewMessage(channelId, messageId);
+            return interaction.editReply({
+              content: "❌ Data confess tidak ditemukan atau sudah diproses."
+            });
+          }
+
+          await supabase
+            .from("confessions")
+            .update({
+              status: "denied",
+              approved_by: interaction.user.id,
+              approved_by_tag: interaction.user.tag,
+              approved_at: new Date().toISOString()
+            })
+            .eq("id", Number(id));
+
+          await safeDm(
+            confession.sender_id,
+            `❌ Confess kamu (#${id}) ditolak oleh staff.\n\n📝 Alasan: ${reason}`
+          );
+
+          await sendLog("❌ Confession Denied With Reason", [
+            { name: "ID", value: `#${id}`, inline: true },
+            { name: "Denied By", value: interaction.user.tag, inline: true },
+            { name: "Reason", value: reason },
+            { name: "Sender", value: `${confession.sender_tag}\n${confession.sender_id}` },
+            { name: "Message", value: confession.message }
+          ]);
+
+          await deleteReviewMessage(channelId, messageId);
+
+          return interaction.editReply({
+            content: `❌ Confession #${id} ditolak dengan alasan.`
+          });
+        }
+
+        if (type === "reply") {
+          const reply = await getReply(id);
+
+          if (!reply || reply.status !== "pending") {
+            await deleteReviewMessage(channelId, messageId);
+            return interaction.editReply({
+              content: "❌ Data reply tidak ditemukan atau sudah diproses."
+            });
+          }
+
+          await supabase
+            .from("replies")
+            .update({ status: "denied" })
+            .eq("id", Number(id));
+
+          await safeDm(
+            reply.sender_id,
+            `❌ Reply kamu (#${id}) ditolak oleh staff.\n\n📝 Alasan: ${reason}`
+          );
+
+          await sendLog("❌ Reply Denied With Reason", [
+            { name: "Reply ID", value: `#${id}`, inline: true },
+            { name: "Confession ID", value: `#${reply.confession_id}`, inline: true },
+            { name: "Denied By", value: interaction.user.tag, inline: true },
+            { name: "Reason", value: reason },
+            { name: "Sender", value: `${reply.sender_tag}\n${reply.sender_id}` },
+            { name: "Reply", value: reply.message }
+          ]);
+
+          await deleteReviewMessage(channelId, messageId);
+
+          return interaction.editReply({
+            content: `❌ Reply #${id} ditolak dengan alasan.`
+          });
+        }
       }
     }
   } catch (error) {
