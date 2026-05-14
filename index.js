@@ -46,6 +46,22 @@ function generateId() {
   return Date.now();
 }
 
+async function getNextDisplayId(table) {
+  const { data, error } = await supabase
+    .from(table)
+    .select("display_id")
+    .order("display_id", { ascending: false })
+    .limit(1);
+
+  if (error || !data || data.length === 0) return 1;
+
+  return (data[0].display_id || 0) + 1;
+}
+
+function showId(data, fallback) {
+  return data?.display_id || fallback;
+}
+
 function isStaff(member) {
   if (!member) return false;
 
@@ -235,7 +251,7 @@ async function getOrCreateThread(parent) {
   if (!publicMessage) return null;
 
   const thread = await publicMessage.startThread({
-    name: `Confession Replies #${parent.id}`,
+    name: `Confession Replies #${showId(parent, parent.id)}`,
     autoArchiveDuration: 1440
   });
 
@@ -349,11 +365,10 @@ client.on("interactionCreate", async interaction => {
         );
 
         interaction.message?.edit({
-          content: "✍️ Membuka form confess...",
+          content: "‎",
           components: []
         }).catch(() => null);
 
-        return interaction.showModal(modal);
         return interaction.showModal(modal);
       }
 
@@ -381,11 +396,13 @@ client.on("interactionCreate", async interaction => {
 
         if (!confessChannel) return;
 
+        const publicId = showId(confession, id);
+
         const publicEmbed = new EmbedBuilder()
           .setTitle(
             confession.anonymous
-              ? `Anonymous Confession (#${id})`
-              : `Confession from ${confession.sender_tag} (#${id})`
+              ? `Anonymous Confession (#${publicId})`
+              : `Confession from ${confession.sender_tag} (#${publicId})`
           )
           .setDescription(`"${confession.message}"`)
           .addFields({
@@ -415,11 +432,11 @@ client.on("interactionCreate", async interaction => {
 
         await safeDm(
           confession.sender_id,
-          `✅ Confess kamu (#${id}) sudah di-approve dan dikirim ke channel confess.`
+          `✅ Confess kamu (#${publicId}) sudah di-approve dan dikirim ke channel confess.`
         );
 
         await sendLog("✅ Confession Approved", [
-          { name: "ID", value: `#${id}`, inline: true },
+          { name: "ID", value: `#${publicId}`, inline: true },
           { name: "Approved By", value: interaction.user.tag, inline: true },
           { name: "Sender", value: `${confession.sender_tag}\n${confession.sender_id}` },
           { name: "Message", value: confession.message }
@@ -466,6 +483,8 @@ client.on("interactionCreate", async interaction => {
           return;
         }
 
+        const publicId = showId(confession, id);
+
         await supabase
           .from("confessions")
           .update({
@@ -478,11 +497,11 @@ client.on("interactionCreate", async interaction => {
 
         await safeDm(
           confession.sender_id,
-          `❌ Confess kamu (#${id}) ditolak oleh staff.`
+          `❌ Confess kamu (#${publicId}) ditolak oleh staff.`
         );
 
         await sendLog("❌ Confession Denied", [
-          { name: "ID", value: `#${id}`, inline: true },
+          { name: "ID", value: `#${publicId}`, inline: true },
           { name: "Denied By", value: interaction.user.tag, inline: true },
           { name: "Sender", value: `${confession.sender_tag}\n${confession.sender_id}` },
           { name: "Message", value: confession.message }
@@ -508,9 +527,11 @@ client.on("interactionCreate", async interaction => {
           });
         }
 
+        const publicId = showId(confession, confessionId);
+
         const modal = new ModalBuilder()
           .setCustomId(`replymodal_${confessionId}`)
-          .setTitle(`Reply Confession #${confessionId}`);
+          .setTitle(`Reply Confession #${publicId}`);
 
         const replyInput = new TextInputBuilder()
           .setCustomId("reply")
@@ -558,8 +579,10 @@ client.on("interactionCreate", async interaction => {
         const thread = await getOrCreateThread(parent);
         if (!thread) return;
 
+        const replyPublicId = showId(reply, replyId);
+
         const replyEmbed = new EmbedBuilder()
-          .setTitle(`Anonymous Reply (#${replyId})`)
+          .setTitle(`Anonymous Reply (#${replyPublicId})`)
           .setDescription(`"${reply.message}"`)
           .setTimestamp();
 
@@ -577,12 +600,12 @@ client.on("interactionCreate", async interaction => {
 
         await safeDm(
           reply.sender_id,
-          `✅ Reply kamu untuk confession #${reply.confession_id} sudah di-approve.`
+          `✅ Reply kamu untuk confession #${showId(parent, parent.id)} sudah di-approve.`
         );
 
         await sendLog("✅ Reply Approved", [
-          { name: "Reply ID", value: `#${replyId}`, inline: true },
-          { name: "Confession ID", value: `#${reply.confession_id}`, inline: true },
+          { name: "Reply ID", value: `#${replyPublicId}`, inline: true },
+          { name: "Confession ID", value: `#${showId(parent, parent.id)}`, inline: true },
           { name: "Approved By", value: interaction.user.tag, inline: true },
           { name: "Sender", value: `${reply.sender_tag}\n${reply.sender_id}` },
           { name: "Reply", value: reply.message }
@@ -629,6 +652,8 @@ client.on("interactionCreate", async interaction => {
           return;
         }
 
+        const publicReplyId = showId(reply, replyId);
+
         await supabase
           .from("replies")
           .update({ status: "denied" })
@@ -636,11 +661,11 @@ client.on("interactionCreate", async interaction => {
 
         await safeDm(
           reply.sender_id,
-          `❌ Reply kamu (#${replyId}) ditolak oleh staff.`
+          `❌ Reply kamu (#${publicReplyId}) ditolak oleh staff.`
         );
 
         await sendLog("❌ Reply Denied", [
-          { name: "Reply ID", value: `#${replyId}`, inline: true },
+          { name: "Reply ID", value: `#${publicReplyId}`, inline: true },
           { name: "Confession ID", value: `#${reply.confession_id}`, inline: true },
           { name: "Denied By", value: interaction.user.tag, inline: true },
           { name: "Sender", value: `${reply.sender_tag}\n${reply.sender_id}` },
@@ -659,6 +684,7 @@ client.on("interactionCreate", async interaction => {
         const anonymous = interaction.customId.endsWith("_anon");
 
         const id = generateId();
+        const displayId = await getNextDisplayId("confessions");
         const target = interaction.fields.getTextInputValue("target");
         const message = interaction.fields.getTextInputValue("confession");
         const attachment =
@@ -666,6 +692,7 @@ client.on("interactionCreate", async interaction => {
 
         const { error } = await supabase.from("confessions").insert({
           id,
+          display_id: displayId,
           sender_id: interaction.user.id,
           sender_tag: interaction.user.tag,
           anonymous,
@@ -693,7 +720,7 @@ client.on("interactionCreate", async interaction => {
         }
 
         const reviewEmbed = new EmbedBuilder()
-          .setTitle(`Confession Awaiting Review (#${id})`)
+          .setTitle(`Confession Awaiting Review (#${displayId})`)
           .setDescription(`"${message}"`)
           .addFields(
             {
@@ -723,7 +750,7 @@ client.on("interactionCreate", async interaction => {
         });
 
         return interaction.editReply({
-          content: `✅ Confession kamu sudah masuk review. Jika di-approve, akan dikirim ke channel confess. (#${id})`
+          content: `✅ Confession kamu sudah masuk review. Jika di-approve, akan dikirim ke channel confess. (#${displayId})`
         });
       }
 
@@ -738,12 +765,14 @@ client.on("interactionCreate", async interaction => {
         }
 
         const replyId = generateId();
+        const replyDisplayId = await getNextDisplayId("replies");
         const message = interaction.fields.getTextInputValue("reply");
         const attachment =
           interaction.fields.getTextInputValue("attachment") || "";
 
         const { error } = await supabase.from("replies").insert({
           id: replyId,
+          display_id: replyDisplayId,
           confession_id: Number(confessionId),
           sender_id: interaction.user.id,
           sender_tag: interaction.user.tag,
@@ -770,12 +799,12 @@ client.on("interactionCreate", async interaction => {
         }
 
         const reviewEmbed = new EmbedBuilder()
-          .setTitle(`Reply Awaiting Review (#${replyId})`)
+          .setTitle(`Reply Awaiting Review (#${replyDisplayId})`)
           .setDescription(`"${message}"`)
           .addFields(
             {
               name: "Untuk Confession",
-              value: `#${confessionId}`
+              value: `#${showId(parent, parent.id)}`
             },
             {
               name: "Sender ID",
@@ -792,7 +821,7 @@ client.on("interactionCreate", async interaction => {
         });
 
         return interaction.editReply({
-          content: `✅ Reply kamu sudah masuk review staff. (#${replyId})`
+          content: `✅ Reply kamu sudah masuk review staff. (#${replyDisplayId})`
         });
       }
 
@@ -814,6 +843,8 @@ client.on("interactionCreate", async interaction => {
             });
           }
 
+          const publicId = showId(confession, id);
+
           await supabase
             .from("confessions")
             .update({
@@ -826,11 +857,11 @@ client.on("interactionCreate", async interaction => {
 
           await safeDm(
             confession.sender_id,
-            `❌ Confess kamu (#${id}) ditolak oleh staff.\n\n📝 Alasan: ${reason}`
+            `❌ Confess kamu (#${publicId}) ditolak oleh staff.\n\n📝 Alasan: ${reason}`
           );
 
           await sendLog("❌ Confession Denied With Reason", [
-            { name: "ID", value: `#${id}`, inline: true },
+            { name: "ID", value: `#${publicId}`, inline: true },
             { name: "Denied By", value: interaction.user.tag, inline: true },
             { name: "Reason", value: reason },
             { name: "Sender", value: `${confession.sender_tag}\n${confession.sender_id}` },
@@ -840,7 +871,7 @@ client.on("interactionCreate", async interaction => {
           await deleteReviewMessage(channelId, messageId);
 
           return interaction.editReply({
-            content: `❌ Confession #${id} ditolak dengan alasan.`
+            content: `❌ Confession #${publicId} ditolak dengan alasan.`
           });
         }
 
@@ -854,6 +885,8 @@ client.on("interactionCreate", async interaction => {
             });
           }
 
+          const publicReplyId = showId(reply, id);
+
           await supabase
             .from("replies")
             .update({ status: "denied" })
@@ -861,11 +894,11 @@ client.on("interactionCreate", async interaction => {
 
           await safeDm(
             reply.sender_id,
-            `❌ Reply kamu (#${id}) ditolak oleh staff.\n\n📝 Alasan: ${reason}`
+            `❌ Reply kamu (#${publicReplyId}) ditolak oleh staff.\n\n📝 Alasan: ${reason}`
           );
 
           await sendLog("❌ Reply Denied With Reason", [
-            { name: "Reply ID", value: `#${id}`, inline: true },
+            { name: "Reply ID", value: `#${publicReplyId}`, inline: true },
             { name: "Confession ID", value: `#${reply.confession_id}`, inline: true },
             { name: "Denied By", value: interaction.user.tag, inline: true },
             { name: "Reason", value: reason },
@@ -876,7 +909,7 @@ client.on("interactionCreate", async interaction => {
           await deleteReviewMessage(channelId, messageId);
 
           return interaction.editReply({
-            content: `❌ Reply #${id} ditolak dengan alasan.`
+            content: `❌ Reply #${publicReplyId} ditolak dengan alasan.`
           });
         }
       }
