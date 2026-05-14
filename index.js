@@ -348,7 +348,12 @@ client.on("interactionCreate", async interaction => {
           new ActionRowBuilder().addComponents(attachmentInput)
         );
 
-        interaction.message?.delete().catch(() => null);
+        interaction.message?.edit({
+          content: "✍️ Membuka form confess...",
+          components: []
+        }).catch(() => null);
+
+        return interaction.showModal(modal);
         return interaction.showModal(modal);
       }
 
