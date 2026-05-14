@@ -362,7 +362,11 @@ client.on("interactionCreate", async interaction => {
         });
       }
 
-      if (interaction.customId.startsWith("reply_")) {
+      if (
+        interaction.customId.startsWith("reply_") &&
+        !interaction.customId.startsWith("reply_accept_") &&
+        !interaction.customId.startsWith("reply_deny_")
+      ) {
         const confessionId = interaction.customId.replace("reply_", "");
         const confession = await getConfession(confessionId);
 
